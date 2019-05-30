@@ -10,14 +10,17 @@ import sys
 import traceback
 from tqdm import tqdm
 from download import DownloadPool
-from Avalon import Avalon
-
+from avalon import Avalon
 
 class RetryError(Exception):pass
-class RetryExhaustedError(RetryError):pass
-class CheckError(RetryError):pass
+class RetryExhausted(RetryError):pass
+class RetryCheckFailed(RetryError):pass
 class UserCancelled(Exception):pass
-class UndifiedMsgType(Exception):pass
+class TiebaApiError(Exception):pass
+class UndifiedMsgType(TiebaApiError):pass
+class RequestError(TiebaApiError):
+    def __init__(self, data):
+        self.data = data
 
 const.PageUrl = "http://c.tieba.baidu.com/c/f/pb/page"
 const.FloorUrl = "http://c.tieba.baidu.com/c/f/pb/floor"
@@ -90,9 +93,9 @@ def Retry(func,args=None,kwargs=None,cfunc=None,ffunc=None,fargs=None,fkwargs=No
             times=max(-1,times-1)
             fg=1
     if (fg):
-        raise CheckError(func.__qualname__,args,cfunc.__qualname__,resp)
+        raise RetryCheckFailed(func.__qualname__,args,cfunc.__qualname__,resp)
     else:
-        raise RetryExhaustedError(func.__qualname__,args,cfunc.__qualname__) from err
+        raise RetryExhausted(func.__qualname__,args,cfunc.__qualname__) from err
 
 def Write(content):
     FileHandle.write(content)
@@ -111,6 +114,9 @@ def TiebaRequest(url,data):
         cfunc=(lambda x: x.status_code==200),ffunc=Progress.set_description,\
         fargs=("Connect Failed,Retrying...",),times=5)
     req.encoding='utf-8'
+    ret=req.json()
+    if (int(ret["error_code"])!=0):
+        raise RequestError({"code":int(ret["error_code"]),"msg":str(ret["error_msg"])})
     return req.json()
 
 def ReqContent(pid,fid,lz):
@@ -172,7 +178,7 @@ def ProcessContent(data,in_html):
         elif (str(s["type"])=="20"):
             content+=ProcessImg(s["src"])
         else:
-            raise UndifiedMsgType("content data wrong: %s"%str(s))
+            raise UndifiedMsgType("content data wrong: \n%s\n"%str(s))
     return content
 
 def ProcessFloor(floor,author,t,content):
@@ -207,7 +213,7 @@ def GetPost(pid,lz,comment):
     content=""
     while (1):
         data=ReqContent(pid,lastfid,lz)
-        # print(data)
+        print(data)
         userlist=ProcessUserList(data["user_list"])
         for floor in data["post_list"]:
             if (int(floor["id"])==lastfid):
@@ -254,9 +260,16 @@ while (1):
         exit(0)
     except UserCancelled:
         Avalon.warning("用户取消")
+    except RequestError as err:
+        err=err.data
+        if (err["code"]==239105):
+            Avalon.error("该贴子不存在或被删除",front="\n")
+        else:
+            Avalon.error("百度贴吧API返回错误,代码:%d\n描述:%s"%(err["code"],err["msg"]),front="\n")
     except Exception as err:
         ForceStop()
         Avalon.error("发生异常:\n"+traceback.format_exc(),front="\n")
         exit(0)
     else:
         Avalon.info("完成 %d"%pid)
+        break
