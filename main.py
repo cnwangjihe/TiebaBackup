@@ -213,7 +213,7 @@ def GetPost(pid,lz,comment):
     content=""
     while (1):
         data=ReqContent(pid,lastfid,lz)
-        print(data)
+        # print(data)
         userlist=ProcessUserList(data["user_list"])
         for floor in data["post_list"]:
             if (int(floor["id"])==lastfid):
