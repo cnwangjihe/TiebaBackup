@@ -198,7 +198,7 @@ class Avalon:
         if batch:
             return default
 
-        print('{}{}{}[?] USER: {}{}'.format(front, Avalon.FG.Y, Avalon.FM.BD, msg, Avalon.FM.RST), end='', file=file)
+        print('{}{}{}[?] USER: {}{}'.format(front, Avalon.FG.C, Avalon.FM.BD, msg, Avalon.FM.RST), end='', file=file)
         return input()
 
     @staticmethod

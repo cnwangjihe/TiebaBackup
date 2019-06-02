@@ -1,1 +1,2 @@
-备份自[https://tieba.baidu.com/p/5801809653](https://tieba.baidu.com/p/5801809653)
+md文件可在线预览  
+html需将整个文件夹下载后查看(github page暂时没搞)  

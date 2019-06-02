@@ -8,6 +8,7 @@ import requests
 import html
 import sys
 import traceback
+import subprocess
 from tqdm import tqdm
 from download import DownloadPool
 from avalon import Avalon
@@ -25,13 +26,10 @@ class RequestError(TiebaApiError):
 const.PageUrl = "http://c.tieba.baidu.com/c/f/pb/page"
 const.FloorUrl = "http://c.tieba.baidu.com/c/f/pb/floor"
 const.EmotionUrl = "http://tieba.baidu.com/tb/editor/images/client/"
+const.AliUrl = "https://tieba.baidu.com/tb/editor/images/ali/"
+const.VoiceUrl = "http://c.tieba.baidu.com/c/p/voice?play_from=pb_voice_play&voice_md5="
 const.SignKey = "tiebaclient!!!"
 # const.IS_WIN=(os.name=="nt")
-
-# def GetEmotions():
-#     for i in (list(range(1,51))+list(range(61,102))):
-#         name="image_emoticon%d.png"%(i)
-#         Pool.Download("https://tieba.baidu.com/tb/editor/images/client/"+name,"emotions/"+name)
 
 def MakeDir(dirname):
     global IsCreate
@@ -45,27 +43,55 @@ def MakeDir(dirname):
         os.mkdir(dirname)
     IsCreate.add(dirname)
 
-def Init(pid,dirname):
-    global FileHandle,Progress,AudioCount,VideoCount,ImageCount,Pool,IsDownload,DirName,IsCreate
+def Init(pid):
+    global FileHandle,Progress,AudioCount,VideoCount,ImageCount,\
+        Pool,IsDownload,DirName,IsCreate,OutputHTML,FFmpeg
     IsDownload=set()
     IsCreate=set()
     AudioCount=VideoCount=ImageCount=0
-    DirName=dirname
     if (os.path.isdir(DirName)):
         Avalon.warning("%s已存在"%DirName)
         if (not Avalon.ask("是否覆盖?",False)):
-            raise UserCancelled
+            raise UserCancelled("...")
     elif (os.path.exists(DirName)):
         raise OSError("pid %d is a file."%pid)
     else:
         os.mkdir(DirName)
+    if (OutputHTML):
+        FileHandle=open("%s/%d.html"%(DirName,pid),"w",encoding="utf-8")
+        Write('<!doctype html><html lang="zh-cn"><head><link rel="stylesheet"'\
+            ' type="text/css" href="main.css"></head><body><div id="write">')
+        shutil.copy("main.css",DirName+"/")
+    else:
+        FileHandle=open("%s/%d.md"%(DirName,pid),"w",encoding="utf-8")
+    try:
+        subprocess.Popen("ffmpeg",stdout=subprocess.DEVNULL,\
+            stderr=subprocess.DEVNULL).wait()
+        FFmpeg=1
+    except FileNotFoundError:
+        Avalon.warning("你可能没有安装ffmpeg,语音将不会被转为mp3")
+        FFmpeg=0
     Pool=DownloadPool(DirName+"/","file")
-    FileHandle=open("%s/%d.md"%(DirName,pid),"w",encoding="utf-8")
     Progress=tqdm(unit="floor")
 
+def ConvertAudio():
+    global AudioCount,DirName,FFmpeg
+    if (not FFmpeg):
+        return
+    for i in tqdm(range(1,AudioCount+1),unit="audio",ascii=True):
+        if (FFmpeg):
+            prefix="%s/audios/%d"%(DirName,i)
+            subprocess.Popen(["ffmpeg","-i","%s.amr"%prefix,\
+                "%s.mp3"%prefix,"-y"],stdout=subprocess.DEVNULL,\
+                stderr=subprocess.DEVNULL).wait()
+            os.remove("%s.amr"%prefix)
+    
 def Done():
+    global OutputHTML
+    if (OutputHTML):
+        Write('</div></body></html>')
     FileHandle.close()
-    Progress.set_description("Waiting for the image download thread...")
+    Progress.set_description("Waiting for the download thread...")
     Pool.Stop()
     Progress.close()
 
@@ -144,14 +170,21 @@ def ReqComment(pid,fid,pn):
 def FormatTime(t):
     return time.strftime("%Y-%m-%d %H:%M",time.localtime(int(t)))
 
-def ProcessText(text,in_html):
-    if (in_html):
-        return html.escape(text)
+def ProcessText(text,in_comment):
+    global OutputHTML
+    if (OutputHTML):
+        if (in_comment):
+            return html.escape(text)
+        else:
+            return html.escape(text).replace("\n","<br />")
     else:
-        return html.escape(text).replace("\\","\\\\").replace("\n","  \n").replace("*","\\*")\
-            .replace("-","\\-").replace("_","\\_").replace("(","\\(").replace(")","\\)")\
-            .replace("#","\\#").replace("`","\\`").replace("~","\\~").replace("[","\\[")\
-            .replace("]","\\]").replace("!","\\!").replace(".","\\.").replace("+","\\+")
+        if (in_comment):
+            return html.escape(text)
+        else:
+            return html.escape(text).replace("\\","\\\\").replace("\n","  \n").replace("*","\\*")\
+                .replace("-","\\-").replace("_","\\_").replace("(","\\(").replace(")","\\)")\
+                .replace("#","\\#").replace("`","\\`").replace("~","\\~").replace("[","\\[")\
+                .replace("]","\\]").replace("!","\\!").replace(".","\\.").replace("+","\\+")
 
 def ProcessUrl(url,text):
     return '<a href="%s">%s</a>'%(url,text)
@@ -165,33 +198,56 @@ def ProcessImg(url):
     return '\n<div><img src="%s" /></div>\n'%name
 
 def ProcessVideo(url,cover):
-    global VideoCount,DirName
+    global VideoCount,DirName,OutputHTML
     MakeDir(DirName+"/videos")
     VideoCount+=1
     vname="videos/%d.%s"%(VideoCount,url.split(".")[-1])
     cname="videos/%d_cover.%s"%(VideoCount,cover.split(".")[-1])
     Pool.Download(url,vname)
     Pool.Download(cover,cname)
-    return '\n<a href="%s"><img src="%s" title="点击查看视频"></a>\n'%(vname,cname)
+    if (OutputHTML):
+        return '\n<video src="%s" poster="%s" controls />\n'%(vname,cname)
+    else:
+        return '\n<a href="%s"><img src="%s" title="点击查看视频"></a>\n'%(vname,cname)
 
 def ProcessAudio(md5):
-    pass
+    global AudioCount,DirName,OutputHTML,FFmpeg
+    MakeDir(DirName+"/audios")
+    AudioCount+=1
+    Pool.Download(const.VoiceUrl+md5,"audios/%d.amr"%AudioCount)
+    if (OutputHTML and FFmpeg):
+        return '<audio src="audios/%d.mp3" controls />'%AudioCount
+    elif (FFmpeg):
+        return '<a href="audios/%d.mp3">语音</a>\n'%AudioCount
+    else:
+        return '<a href="audios/%d.amr">语音</a>\n'%AudioCount
 
 def ProcessEmotion(name,text):
     global DirName,IsDownload
     MakeDir(DirName+"/images")
-    if (len(name)==14):
+    lname=len(name)
+    if (name=="image_emoticon"):
         name+="1"
+        lname+=1
+    url=""
+    if (lname>=3 and name[0:3]=="ali"):
+        url="%s%s.gif"%(const.AliUrl,name)
+        name+=".gif"
+    elif (lname>=14 and name[0:14]=="image_emoticon"):
+        url="%s%s.png"%(const.EmotionUrl,name)
+        name+=".png"
+    else:
+        Avalon.warning("未知表情:%s\n"%name,front="\n")
     if (not name in IsDownload):
         IsDownload.add(name)
-        Pool.Download("%s%s.png"%(const.EmotionUrl,name),"images/%s.png"%name)
-    return '<img src="images/%s.png" title="%s" />'%(name,text)
+        Pool.Download(url,"images/%s"%name)
+    return '<img src="images/%s" alt="%s" title="%s" />'%(name,text,text)
 
-def ProcessContent(data,in_html):
+def ProcessContent(data,in_comment):
     content=""
     for s in data:
         if (str(s["type"])=="0"):
-            content+=ProcessText(s["text"],in_html)
+            content+=ProcessText(s["text"],in_comment)
         elif (str(s["type"])=="1"):
             content+=ProcessUrl(s["link"],s["text"])
         elif (str(s["type"])=="2"):
@@ -199,13 +255,13 @@ def ProcessContent(data,in_html):
         elif (str(s["type"])=="3"):
             content+=ProcessImg(s["origin_src"])
         elif (str(s["type"])=="4"):
-            content+=ProcessText(s["text"],in_html)
+            content+=ProcessText(s["text"],in_comment)
         elif (str(s["type"])=="5"):
             content+=ProcessVideo(s["link"],s["src"])
         elif (str(s["type"])=="9"):
-            content+=ProcessText(s["text"],in_html)
-        # elif (str(s["type"])=="10"):
-            # content+=ProcessAudio(s["voice_md5"])
+            content+=ProcessText(s["text"],in_comment)
+        elif (str(s["type"])=="10"):
+            content+=ProcessAudio(s["voice_md5"])
         elif (str(s["type"])=="11"):
             content+=ProcessImg(s["static"])
         elif (str(s["type"])=="20"):
@@ -216,15 +272,24 @@ def ProcessContent(data,in_html):
     return content
 
 def ProcessFloor(floor,author,t,content):
-    return '<hr />\n\n%s\n<div align="right" style="font-size:12px;color:#CCC;">\
-        %s楼 | %s | %s</div>\n'%(content,floor,author,FormatTime(t))
+    global OutputHTML
+    if (OutputHTML):
+        return '<hr />\n<div>%s</div><br />\n<div class="author">\
+            %s楼 | %s | %s</div>\n'%(content,floor,author,FormatTime(t))
+    else:
+        return '<hr />\n\n%s\n<div align="right" style="font-size:12px;color:#CCC;">\
+            %s楼 | %s | %s</div>\n'%(content,floor,author,FormatTime(t))
 
 def ProcessComment(author,t,content):
-    return '%s | %s:<blockquote>%s</blockquote>'%(FormatTime(t),author,content)
+        return '%s | %s:<blockquote>%s</blockquote>'%(FormatTime(t),author,content)
 
 def GetComment(pid,fid):
-    Write('<pre style="background-color: #f6f8fa;border-radius: 3px;\
-        font-size: 85%;line-height: 1.45;overflow: auto;padding: 16px;">')
+    global OutputHTML
+    if (OutputHTML):
+        Write('<pre>')
+    else:
+        Write('<pre style="background-color: #f6f8fa;border-radius: 3px;\
+            font-size: 85%;line-height: 1.45;overflow: auto;padding: 16px;">')
     pn=1
     while (1):
         data=ReqComment(pid,fid,pn)
@@ -244,7 +309,6 @@ def ProcessUserList(data):
 
 def GetPost(pid,lz,comment):
     lastfid=-1
-    content=""
     while (1):
         data=ReqContent(pid,lastfid,lz)
         # print(data)
@@ -264,7 +328,7 @@ def GetPost(pid,lz,comment):
             break
         # print(fid,lastfid)
         lastfid=fid
-    return content
+
 while (1):
     try:
         try:
@@ -278,16 +342,18 @@ while (1):
     
         lz=Avalon.ask("只看楼主?",False)
         comment=(0 if lz else Avalon.ask("包括评论?",True))
-        dirname=Avalon.gets("文件夹名(空则表示使用id):")
-        if (len(dirname)==0):
-            dirname=str(pid)
-        Avalon.info("id:%d , 选定:%s && %s评论 , 目录:%s"%(pid,("楼主" if lz else "全部"),("全" if comment else "无"),dirname))
+        DirName=Avalon.gets("文件夹名(空则表示使用id):")
+        if (len(DirName)==0):
+            DirName=str(pid)
+        OutputHTML=Avalon.ask("输出HTML(否则表示输出Makrdown)?:",True)
+        Avalon.info("id:%d , 选定:%s && %s评论 , 目录:%s"%(pid,("楼主" if lz else "全部"),("全" if comment else "无"),DirName))
         if (not Avalon.ask("确认无误?",True)):
             Avalon.warning("请重新输入")
             continue
-        Init(pid,dirname)
-        FileHandle.write(GetPost(pid,lz,comment))
+        Init(pid)
+        GetPost(pid,lz,comment)
         Done()
+        ConvertAudio()
     except KeyboardInterrupt:
         ForceStop()
         Avalon.error("Control-C,exiting",front="\n")
