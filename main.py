@@ -33,21 +33,34 @@ const.SignKey = "tiebaclient!!!"
 #         name="image_emoticon%d.png"%(i)
 #         Pool.Download("https://tieba.baidu.com/tb/editor/images/client/"+name,"emotions/"+name)
 
-def Init(pid,dirname):
-    global FileHandle,Progress,ImgCount,Pool,IsDownload
-    IsDownload=set()
-    ImgCount=0
+def MakeDir(dirname):
+    global IsCreate
+    if (dirname in IsCreate):
+        return
     if (os.path.isdir(dirname)):
-        Avalon.warning("%s已存在"%dirname)
-        if (not Avalon.ask("是否覆盖?",False)):
-            raise UserCancelled
+        pass
     elif (os.path.exists(dirname)):
-        raise OSError("pid %d is a file."%pid)
+        raise OSError("%s is a file"%dirname)
     else:
         os.mkdir(dirname)
-        os.mkdir(dirname+"/images")
-    Pool=DownloadPool(dirname+"/images/","images")
-    FileHandle=open("%s/%d.md"%(dirname,pid),"w",encoding="utf-8")
+    IsCreate.add(dirname)
+
+def Init(pid,dirname):
+    global FileHandle,Progress,AudioCount,VideoCount,ImageCount,Pool,IsDownload,DirName,IsCreate
+    IsDownload=set()
+    IsCreate=set()
+    AudioCount=VideoCount=ImageCount=0
+    DirName=dirname
+    if (os.path.isdir(DirName)):
+        Avalon.warning("%s已存在"%DirName)
+        if (not Avalon.ask("是否覆盖?",False)):
+            raise UserCancelled
+    elif (os.path.exists(DirName)):
+        raise OSError("pid %d is a file."%pid)
+    else:
+        os.mkdir(DirName)
+    Pool=DownloadPool(DirName+"/","file")
+    FileHandle=open("%s/%d.md"%(DirName,pid),"w",encoding="utf-8")
     Progress=tqdm(unit="floor")
 
 def Done():
@@ -144,19 +157,35 @@ def ProcessUrl(url,text):
     return '<a href="%s">%s</a>'%(url,text)
 
 def ProcessImg(url):
-    global ImgCount
-    ImgCount+=1
-    Pool.Download(url,"%d.jpg"%ImgCount)
-    return '\n<div><img src="images/%d.jpg" /></div>\n'%ImgCount
+    global ImageCount,DirName
+    MakeDir(DirName+"/images")
+    ImageCount+=1
+    name="images/%d.%s"%(ImageCount,url.split(".")[-1])
+    Pool.Download(url,name)
+    return '\n<div><img src="%s" /></div>\n'%name
+
+def ProcessVideo(url,cover):
+    global VideoCount,DirName
+    MakeDir(DirName+"/videos")
+    VideoCount+=1
+    vname="videos/%d.%s"%(VideoCount,url.split(".")[-1])
+    cname="videos/%d_cover.%s"%(VideoCount,cover.split(".")[-1])
+    Pool.Download(url,vname)
+    Pool.Download(cover,cname)
+    return '\n<a href="%s"><img src="%s" title="点击查看视频"></a>\n'%(vname,cname)
+
+def ProcessAudio(md5):
+    pass
 
 def ProcessEmotion(name,text):
+    global DirName,IsDownload
+    MakeDir(DirName+"/images")
     if (len(name)==14):
         name+="1"
-    name+=".png"
     if (not name in IsDownload):
-        Pool.Download(const.EmotionUrl+name,name)
         IsDownload.add(name)
-    return '<img src="images/%s" alt="%s" />'%(name,text)
+        Pool.Download("%s%s.png"%(const.EmotionUrl,name),"images/%s.png"%name)
+    return '<img src="images/%s.png" title="%s" />'%(name,text)
 
 def ProcessContent(data,in_html):
     content=""
@@ -171,14 +200,19 @@ def ProcessContent(data,in_html):
             content+=ProcessImg(s["origin_src"])
         elif (str(s["type"])=="4"):
             content+=ProcessText(s["text"],in_html)
+        elif (str(s["type"])=="5"):
+            content+=ProcessVideo(s["link"],s["src"])
         elif (str(s["type"])=="9"):
             content+=ProcessText(s["text"],in_html)
+        # elif (str(s["type"])=="10"):
+            # content+=ProcessAudio(s["voice_md5"])
         elif (str(s["type"])=="11"):
             content+=ProcessImg(s["static"])
         elif (str(s["type"])=="20"):
             content+=ProcessImg(s["src"])
         else:
-            raise UndifiedMsgType("content data wrong: \n%s\n"%str(s))
+            Avalon.warning("content data wrong: \n%s\n"%str(s),front="\n")
+            # raise UndifiedMsgType("content data wrong: \n%s\n"%str(s))
     return content
 
 def ProcessFloor(floor,author,t,content):
