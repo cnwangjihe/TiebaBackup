@@ -222,7 +222,7 @@ def ProcessAudio(md5):
     else:
         return '<a href="audios/%d.amr">语音</a>\n'%AudioCount
 
-def ProcessEmotion(name,text):
+def ProcessEmotion(floor,name,text):
     global DirName,IsDownload
     MakeDir(DirName+"/images")
     lname=len(name)
@@ -237,13 +237,14 @@ def ProcessEmotion(name,text):
         url="%s%s.png"%(const.EmotionUrl,name)
         name+=".png"
     else:
-        Avalon.warning("未知表情:%s\n"%name,front="\n")
+        Avalon.warning("第%s楼出现未知表情:%s\n"%(floor,name),front="\n")
+        return ''
     if (not name in IsDownload):
         IsDownload.add(name)
         Pool.Download(url,"images/%s"%name)
     return '<img src="images/%s" alt="%s" title="%s" />'%(name,text,text)
 
-def ProcessContent(data,in_comment):
+def ProcessContent(floor,data,in_comment):
     content=""
     for s in data:
         if (str(s["type"])=="0"):
@@ -251,7 +252,7 @@ def ProcessContent(data,in_comment):
         elif (str(s["type"])=="1"):
             content+=ProcessUrl(s["link"],s["text"])
         elif (str(s["type"])=="2"):
-            content+=ProcessEmotion(s["text"],s["c"])
+            content+=ProcessEmotion(floor,s["text"],s["c"])
         elif (str(s["type"])=="3"):
             content+=ProcessImg(s["origin_src"])
         elif (str(s["type"])=="4"):
@@ -267,7 +268,7 @@ def ProcessContent(data,in_comment):
         elif (str(s["type"])=="20"):
             content+=ProcessImg(s["src"])
         else:
-            Avalon.warning("content data wrong: \n%s\n"%str(s),front="\n")
+            Avalon.warning("floor %s: content data wrong: \n%s\n"%(floor,str(s)),front="\n")
             # raise UndifiedMsgType("content data wrong: \n%s\n"%str(s))
     return content
 
@@ -283,7 +284,7 @@ def ProcessFloor(floor,author,t,content):
 def ProcessComment(author,t,content):
         return '%s | %s:<blockquote>%s</blockquote>'%(FormatTime(t),author,content)
 
-def GetComment(pid,fid):
+def GetComment(floor,pid,fid):
     global OutputHTML
     if (OutputHTML):
         Write('<pre>')
@@ -297,7 +298,7 @@ def GetComment(pid,fid):
         if (len(data)==0):
             break
         for comment in data:
-            Write(ProcessComment(comment["author"]["name_show"],comment["time"],ProcessContent(comment["content"],1)))
+            Write(ProcessComment(comment["author"]["name_show"],comment["time"],ProcessContent(floor,comment["content"],1)))
         pn+=1
     Write('</pre>')
 
@@ -316,14 +317,15 @@ def GetPost(pid,lz,comment):
         for floor in data["post_list"]:
             if (int(floor["id"])==lastfid):
                 continue
+            fnum=floor["floor"]
             Progress.update(1)
-            Progress.set_description("Collecting floor %s"%floor["floor"])
+            Progress.set_description("Collecting floor %s"%fnum)
             fid=int(floor["id"])
-            Write(ProcessFloor(floor["floor"],userlist[floor["author_id"]]["name"],floor["time"],ProcessContent(floor["content"],0)))
+            Write(ProcessFloor(fnum,userlist[floor["author_id"]]["name"],floor["time"],ProcessContent(fnum,floor["content"],0)))
             if (int(floor["sub_post_number"])==0):
                 continue
             if (comment):
-                GetComment(pid,floor["id"])
+                GetComment(fnum,pid,floor["id"])
         if (lastfid==fid):
             break
         # print(fid,lastfid)
