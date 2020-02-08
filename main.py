@@ -41,23 +41,27 @@ def MakeDir(dirname):
     elif (os.path.exists(dirname)):
         raise OSError("%s is a file"%dirname)
     else:
-        os.mkdir(dirname)
+        os.makedirs(dirname)
     IsCreate.add(dirname)
 
-def Init(pid):
+def Init(pid,overwrite):
     global FileHandle,Progress,AudioCount,VideoCount,ImageCount,\
         Pool,IsDownload,DirName,IsCreate,OutputHTML,FFmpeg
     IsDownload=set()
     IsCreate=set()
     AudioCount=VideoCount=ImageCount=0
     if (os.path.isdir(DirName)):
-        Avalon.warning("%s已存在"%DirName)
-        if (not Avalon.ask("是否覆盖?",False)):
+        Avalon.warning("\"%s\"已存在"%DirName)
+        if (overwrite==1):
+            Avalon.warning("跳过%d"%pid)
+        elif (overwrite==2):
+            Avalon.warning("默认覆盖\"%s\""%DirName)
+        elif (not Avalon.ask("是否覆盖?",False)):
             raise UserCancelled("...")
     elif (os.path.exists(DirName)):
         raise OSError("存在同名文件")
     else:
-        os.mkdir(DirName)
+        os.makedirs(DirName)
     if (OutputHTML):
         FileHandle=open("%s/%d.html"%(DirName,pid),"w",encoding="utf-8")
         Write('<!doctype html><html lang="zh-cn"><head><link rel="stylesheet"'\
@@ -70,14 +74,14 @@ def Init(pid):
             stderr=subprocess.DEVNULL).wait()
         FFmpeg=1
     except FileNotFoundError:
-        Avalon.warning("你可能没有安装ffmpeg,语音将不会被转为mp3")
+        Avalon.warning("未找到ffmpeg,语音将不会被转为mp3")
         FFmpeg=0
     Pool=DownloadPool(DirName+"/","file")
     Progress=tqdm(unit="floor")
 
 def ConvertAudio():
     global AudioCount,DirName,FFmpeg
-    if (not FFmpeg):
+    if ((not FFmpeg) or (not AudioCount)):
         return
     for i in tqdm(range(1,AudioCount+1),unit="audio",ascii=True):
         if (FFmpeg):
@@ -197,9 +201,11 @@ def ProcessUrl(url,text):
 
 def ProcessImg(url):
     global ImageCount,DirName
+    if (url[0:2]=="//"):
+        url="http:"+url
     MakeDir(DirName+"/images")
     ImageCount+=1
-    name="images/%d.%s"%(ImageCount,url.split(".")[-1])
+    name="images/%d.%s"%(ImageCount,url.split("?")[0].split(".")[-1])
     Pool.Download(url,name)
     return '\n<div><img src="%s" /></div>\n'%name
 
@@ -315,7 +321,9 @@ def ProcessUserList(data):
     return userlist
 
 def GetTitle(pid):
-    return TiebaRequest(const.PageUrl,{"kz":str(pid),"_client_version":"9.9.8.32"},True)["post_list"][0]["title"]
+    data=TiebaRequest(const.PageUrl,{"kz":str(pid),"_client_version":"9.9.8.32"},True)
+    return {"post":data["post_list"][0]["title"],"forum":data["forum"]["name"]}
+
 
 def GetPost(pid,lz,comment):
     lastfid=-1
@@ -342,6 +350,27 @@ def GetPost(pid,lz,comment):
 
 while (1):
     try:
+        if (Avalon.ask("批量模式?",False)):
+            PreSet=True
+            lz=Avalon.ask("只看楼主?",False)
+            comment=(0 if lz else Avalon.ask("包括评论?",True))
+            OutputHTML=Avalon.ask("输出HTML(否则表示输出Makrdown)?:",True)
+            overwrite=Avalon.ask("默认覆盖?",False)
+            Avalon.info("选定:%s && %s评论 , 目录:\"吧名\\标题\""%(("楼主" if lz else "全部"),("全" if comment else "无")))
+            if (not Avalon.ask("确认无误?",True)):
+                Avalon.warning("请重新输入")
+            else:
+                break
+        else:
+            PreSet=False
+            break
+    except KeyboardInterrupt:
+        ForceStop()
+        Avalon.error("Control-C,exiting",front="\n")
+        exit(0)
+
+while (1):
+    try:
         try:
             pid=int((Avalon.gets("请输入帖子链接或id(输入0退出):").split('/'))[-1].split('?')[0])
         except Exception:
@@ -351,18 +380,20 @@ while (1):
             exit(0)
         Avalon.info("id:%d"%pid)
         title=GetTitle(pid)
-        title=re.sub(r"[\/\\\:\*\?\"\<\>\|]", "_",title)
-        lz=Avalon.ask("只看楼主?",False)
-        comment=(0 if lz else Avalon.ask("包括评论?",True))
-        DirName=Avalon.gets("文件夹名(空则表示使用[id]标题):")
-        if (len(DirName)==0):
-            DirName=title
-        OutputHTML=Avalon.ask("输出HTML(否则表示输出Makrdown)?:",True)
-        Avalon.info("id:%d , 选定:%s && %s评论 , 目录:%s"%(pid,("楼主" if lz else "全部"),("全" if comment else "无"),DirName))
-        if (not Avalon.ask("确认无误?",True)):
-            Avalon.warning("请重新输入")
-            continue
-        Init(pid)
+        title["forum"]=re.sub(r"[\/\\\:\*\?\"\<\>\|]", "_",title["forum"])
+        title["post"]=re.sub(r"[\/\\\:\*\?\"\<\>\|]", "_",title["post"])
+        if (not PreSet):
+            lz=Avalon.ask("只看楼主?",False)
+            comment=(0 if lz else Avalon.ask("包括评论?",True))
+            DirName=Avalon.gets("文件夹名(空则表示使用\"吧名\\标题\"):")
+            OutputHTML=Avalon.ask("输出HTML(否则表示输出Makrdown)?:",True)
+            if (len(DirName)==0):
+                DirName=title["forum"]+"\\"+title["post"]
+            Avalon.info("id:%d , 选定:%s && %s评论 , 目录:\"%s\""%(pid,("楼主" if lz else "全部"),("全" if comment else "无"),DirName))
+            Init(pid,0)
+        else:
+            DirName=title["forum"]+"\\"+title["post"]
+            Init(pid,int(overwrite)+1)
         GetPost(pid,lz,comment)
         Done()
         ConvertAudio()
@@ -374,14 +405,12 @@ while (1):
         Avalon.warning("用户取消")
     except RequestError as err:
         err=err.data
-        if (err["code"]==239105):
-            Avalon.error("该贴子不存在或被删除",front="\n")
-        else:
-            Avalon.error("百度贴吧API返回错误,代码:%d\n描述:%s"%(err["code"],err["msg"]),front="\n")
+        Avalon.error("百度贴吧API返回错误,代码:%d\n描述:%s"%(err["code"],err["msg"]),front="\n")
     except Exception as err:
         ForceStop()
         Avalon.error("发生异常:\n"+traceback.format_exc(),front="\n")
         exit(0)
     else:
         Avalon.info("完成 %d"%pid)
+    if (not PreSet):
         break
