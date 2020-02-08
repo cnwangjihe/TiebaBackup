@@ -9,6 +9,7 @@ import html
 import sys
 import traceback
 import subprocess
+import re
 from tqdm import tqdm
 from download import DownloadPool
 from avalon import Avalon
@@ -54,7 +55,7 @@ def Init(pid):
         if (not Avalon.ask("是否覆盖?",False)):
             raise UserCancelled("...")
     elif (os.path.exists(DirName)):
-        raise OSError("pid %d is a file."%pid)
+        raise OSError("存在同名文件")
     else:
         os.mkdir(DirName)
     if (OutputHTML):
@@ -148,8 +149,13 @@ def SignRequest(data):
     data.update({"sign": str(sign)})
     return data
 
-def TiebaRequest(url,data):
-    req=Retry(requests.post,args=(url,),kwargs={"data":SignRequest(data)},\
+def TiebaRequest(url,data,first=False):
+    if (first):
+        req=Retry(requests.post,args=(url,),kwargs={"data":SignRequest(data)},\
+        cfunc=(lambda x: x.status_code==200),ffunc=print,\
+        fargs=("Connect Failed,Retrying...\n",),times=5)
+    else:
+        req=Retry(requests.post,args=(url,),kwargs={"data":SignRequest(data)},\
         cfunc=(lambda x: x.status_code==200),ffunc=Progress.set_description,\
         fargs=("Connect Failed,Retrying...",),times=5)
     req.encoding='utf-8'
@@ -308,6 +314,9 @@ def ProcessUserList(data):
         userlist[user["id"]]={"id":user["portrait"].split("?")[0],"name":user["name_show"]}
     return userlist
 
+def GetTitle(pid):
+    return TiebaRequest(const.PageUrl,{"kz":str(pid),"_client_version":"9.9.8.32"},True)["post_list"][0]["title"]
+
 def GetPost(pid,lz,comment):
     lastfid=-1
     while (1):
@@ -334,19 +343,20 @@ def GetPost(pid,lz,comment):
 while (1):
     try:
         try:
-            pid=int((Avalon.gets("请输入帖子链接或id:").split('/'))[-1].split('?')[0])
+            pid=int((Avalon.gets("请输入帖子链接或id(输入0退出):").split('/'))[-1].split('?')[0])
         except Exception:
             Avalon.warning("未找到正确的id")
             continue
         if (pid==0):
             exit(0)
         Avalon.info("id:%d"%pid)
-    
+        title=GetTitle(pid)
+        title=re.sub(r"[\/\\\:\*\?\"\<\>\|]", "_",title)
         lz=Avalon.ask("只看楼主?",False)
         comment=(0 if lz else Avalon.ask("包括评论?",True))
-        DirName=Avalon.gets("文件夹名(空则表示使用id):")
+        DirName=Avalon.gets("文件夹名(空则表示使用[id]标题):")
         if (len(DirName)==0):
-            DirName=str(pid)
+            DirName=title
         OutputHTML=Avalon.ask("输出HTML(否则表示输出Makrdown)?:",True)
         Avalon.info("id:%d , 选定:%s && %s评论 , 目录:%s"%(pid,("楼主" if lz else "全部"),("全" if comment else "无"),DirName))
         if (not Avalon.ask("确认无误?",True)):
