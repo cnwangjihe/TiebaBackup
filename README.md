@@ -48,14 +48,14 @@ python3 main.py
 
 ##### 一些参数
 
-| Var name       | Value                | Type          | Description       |
-|:------------:  |:--------------------:|:-------------:|:-------------|
-| PreSet         | True / **False**     | bool          | 批量模式（自动版暂不支持） |
-| overwrite      | 1 / **2**            | int           |   是否覆盖（1为跳过，2为覆盖，其他值交互） |
-| sckey          | "xxxxxxxxxxx"        | string        | 用于Server酱推送的Key，没有请留空 |
-| pid            | 123456789            | int           | 帖子 ID |
+| Var name       | Value                | Type          | Description                                |
+|:------------:  |:--------------------:|:-------------:|:-------------------------------------------|
+| PreSet         | True / **False**     | bool          | 批量模式（自动版暂不支持）                    |
+| overwrite      | 1 / **2**            | int           |   是否覆盖（1为跳过，2为覆盖，其他值交互）     |
+| sckey          | "xxxxxxxxxxx"        | string        | 用于Server酱推送的Key，没有请留空             |
+| pid            | 123456789            | int           | 帖子 ID                                       |
 | lz             | True / False         | bool          | 只看楼主模式 |
-| comment        | **True** / False     | bool      | 是否包含楼中楼（评论） |
+| comment        | **True** / False     | bool          | 是否包含楼中楼（评论） |
 | DirName        | "xxxxxx"             | string        | 用于保存文件的目录名 |
 
 <br>
@@ -81,6 +81,18 @@ python3 main.py
 同时，也需要注意py文件的“换行符(Line-Ending)”，`CRLF / LF`
 
 *另外建议 `vim .bashrc` , 注释掉其中的 `alias rm='rm -i'` 和 `alias cp='cp -i`，否则可能因为需要交互，导致程序暂停*
+
+在此之后，如果你有网站，建议在 py 文件接近结尾处添加如下代码，实现 “把备份的内容拷贝到网站目录”
+
+```python
+try:
+    Avalon.info("尝试拷贝到网站目录……")
+    os.system("cp -rf ./%s /www/wwwroot/www.yoursite.com/" % (DirName))  # /www/wwwroot/www.yoursite.com/ 换成你的网站所在的目录
+except Exception:
+    Avalon.error("拷贝出错")
+else:
+    Avalon.info("拷贝成功！")
+```
 
 <br>
 
